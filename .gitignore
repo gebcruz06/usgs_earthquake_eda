@@ -1,8 +1,11 @@
 data/raw/
-
+metastore_db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 
 # Environments
 .env
+
+# Other files
+derby.log
