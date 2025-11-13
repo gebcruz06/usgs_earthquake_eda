@@ -2,7 +2,7 @@ import requests
 import json
 from datetime import date, timedelta
 
-start_date = date.today() - timedelta(7) # 7 days
+start_date = date.today() - timedelta(7) # past 7 days
 end_date = date.today() - timedelta(1)
 
 output_dir = f'./data/raw'
@@ -21,7 +21,7 @@ try:
     if not data:
         print("No data returned for the specified date range.")
     else:
-        file_path = f'{output_dir}/{start_date}_earthquake_data.json'
+        file_path = f'{output_dir}/usgs_earthquake_raw.json'
 
         # Save the JSON data
         with open(file_path, 'w') as file:

@@ -1,57 +1,80 @@
-from pyspark.sql import SparkSession
-from datetime import date, timedelta
-import reverse_geocoder as rg
+import pandas as pd
+import geopandas as gpd
+import json
 import os
 
-# Suppress Hadoop warnings for Windows
-os.environ['HADOOP_HOME'] = os.path.dirname(os.path.abspath(__file__))
+input_dir = './data/raw'
+os.makedirs(input_dir, exist_ok=True)
 
-# Initialize Spark session
-spark = SparkSession.builder \
-    .appName("EarthquakeDataProcessing") \
-    .master("local[*]") \
-    .config("spark.sql.warehouse.dir", "./spark-warehouse") \
-    .config("spark.driver.host", "localhost") \
-    .enableHiveSupport() \
-    .getOrCreate()
+output_dir = './data/processed'
+os.makedirs(output_dir, exist_ok=True)
 
-# Set log level to reduce console output
-spark.sparkContext.setLogLevel("ERROR")
+file_path = f"{input_dir}/usgs_earthquake_raw.json"
 
-start_date = date.today() - timedelta(7)
-input_dir = f'./data/raw'
+# === Load JSON data ===
+print(f"Loading data from {file_path}...")
+with open(file_path, 'r') as f:
+    data = json.load(f)
 
-# Load the JSON data into a Spark DataFrame
-df = spark.read.option("multiline", "true").json(f"{input_dir}/{start_date}_earthquake_data.json")
+# === Flatten nested JSON ===
+records = []
+for feature in data:
+    geometry = feature.get('geometry', {})
+    properties = feature.get('properties', {})
+    coordinates = geometry.get('coordinates', [0, 0, 0])
 
-# Register the DataFrame as a temporary view
-df.createOrReplaceTempView("raw_earthquake_data")
+    record = {
+        'id': feature.get('id'),
+        'longitude': coordinates[0] if coordinates[0] is not None else 0,
+        'latitude': coordinates[1] if coordinates[1] is not None else 0,
+        'elevation': coordinates[2] if coordinates[2] is not None else 0,
+        'title': properties.get('title'),
+        'place_description': properties.get('place'),
+        'sig': properties.get('sig'),
+        'mag': properties.get('mag'),
+        'magType': properties.get('magType'),
+        'time': pd.to_datetime(properties.get('time', 0), unit='ms', errors='coerce'),
+        'updated': pd.to_datetime(properties.get('updated', 0), unit='ms', errors='coerce')
+    }
+    records.append(record)
 
-# Reshape, validate, and transform earthquake data using SQL
-final_df = spark.sql("""
-    SELECT 
-        id,
-        COALESCE(geometry.coordinates[0], 0) as longitude,
-        COALESCE(geometry.coordinates[1], 0) as latitude,
-        geometry.coordinates[2] as elevation,
-        properties.title as title,
-        properties.place as place_description,
-        properties.sig as sig,
-        (case
-            when properties.sig < 100 then 'Low'
-            when properties.sig >= 100 and properties.sig < 500 then 'Moderate'
-            when properties.sig > 500 then 'High'
-        end) as sig_class, 
-        properties.mag as mag,
-        properties.magType as magType,
-        CAST(COALESCE(properties.time, 0) / 1000 AS TIMESTAMP) as time,
-        CAST(COALESCE(properties.updated, 0) / 1000 AS TIMESTAMP) as updated
-    FROM raw_earthquake_data
-""")
+df = pd.DataFrame(records)
 
-# Show some results to verify it worked
-print(f"Processing {final_df.count()} earthquake records")
-final_df.show(5)
+# === Classify significance ===
+def classify_sig(sig):
+    if pd.isna(sig):
+        return None
+    elif sig < 100:
+        return 'Low'
+    elif sig < 500:
+        return 'Moderate'
+    else:
+        return 'High'
 
-# Stop the Spark session
-spark.stop()
+df['sig_class'] = df['sig'].apply(classify_sig)
+
+# === Create GeoDataFrame ===
+print(f"Geocoding {len(df)} earthquake records using coordinates...")
+
+# Load the local shapefile for country boundaries
+map_path = './data/map/ne_110m_admin_0_countries.shp'
+world = gpd.read_file(map_path)
+world = world.to_crs(epsg=4326)
+
+# Create GeoDataFrame from earthquake coordinates
+gdf = gpd.GeoDataFrame(
+    df,
+    geometry=gpd.points_from_xy(df.longitude, df.latitude),
+    crs="EPSG:4326"
+)
+
+# Spatial join to get country code
+gdf = gdf.sjoin(world[['geometry', 'ADM0_A3']], how='left', predicate='within')
+
+# Add country code to DataFrame
+df['country_code'] = gdf['ADM0_A3']
+
+# === Save processed CSV ===
+output_file = f"{output_dir}/usgs_earthquake_processed.csv"
+df.to_csv(output_file, index=False)
+print(f"\nData saved to {output_file}")
