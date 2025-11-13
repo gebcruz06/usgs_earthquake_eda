@@ -41,9 +41,7 @@ df = pd.DataFrame(records)
 
 # Classify magnitude
 def classify_mag(mag):
-    if pd.isna(mag):
-        return None
-    elif mag >= 8.0:
+    if mag >= 8.0:
         return 'Great'
     elif mag >= 7.0:
         return 'Major'
