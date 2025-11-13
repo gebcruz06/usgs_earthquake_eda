@@ -5,16 +5,18 @@ import os
 
 input_dir = './data/raw'
 os.makedirs(input_dir, exist_ok=True)
+
 output_dir = './data/processed'
 os.makedirs(output_dir, exist_ok=True)
+
 file_path = f"{input_dir}/usgs_earthquake_raw.json"
 
-# === Load JSON data ===
+# Load JSON data
 print(f"Loading data from {file_path}...")
 with open(file_path, 'r') as f:
     data = json.load(f)
 
-# === Flatten nested JSON ===
+# Flatten nested JSON
 records = []
 for feature in data:
     geometry = feature.get('geometry', {})
@@ -34,10 +36,9 @@ for feature in data:
         'updated': pd.to_datetime(properties.get('updated', 0), unit='ms', errors='coerce')
     }
     records.append(record)
-
 df = pd.DataFrame(records)
 
-# === Classify significance ===
+# Classify significance
 def classify_sig(sig):
     if pd.isna(sig):
         return None
@@ -47,10 +48,9 @@ def classify_sig(sig):
         return 'Moderate'
     else:
         return 'High'
-
 df['sig_class'] = df['sig'].apply(classify_sig)
 
-# === Create GeoDataFrame ===
+# Create GeoDataFrame
 print(f"Geocoding {len(df)} earthquake records using coordinates...")
 
 # Load the local shapefile for country boundaries
@@ -64,14 +64,16 @@ gdf = gpd.GeoDataFrame(
     geometry=gpd.points_from_xy(df.longitude, df.latitude),
     crs="EPSG:4326"
 )
-
 # Spatial join to get country code
 gdf = gdf.sjoin(world[['geometry', 'ADM0_A3']], how='left', predicate='within')
 
-# === Assign nearest country for null values ===
+# Add earthquake_type column before nearest country assignment
+gdf['earthquake_type'] = gdf['ADM0_A3'].apply(lambda x: 'inland' if pd.notna(x) else 'coastal')
+print(f"Earthquake types assigned: {gdf['earthquake_type'].value_counts().to_dict()}")
+
+# Assign nearest country for null values
 null_mask = gdf['ADM0_A3'].isna()
 null_count = null_mask.sum()
-
 if null_count > 0:
     print(f"Found {null_count} earthquakes without country assignment. Assigning nearest country...")
     for idx in gdf[null_mask].index:
@@ -79,10 +81,11 @@ if null_count > 0:
         gdf.loc[idx, 'ADM0_A3'] = world.loc[nearest_idx, 'ADM0_A3']
     print(f"Successfully assigned nearest country to all {null_count} earthquakes.")
 
-# Add country code to DataFrame
+# Add country code and earthquake type to DataFrame
 df['country_code'] = gdf['ADM0_A3']
+df['earthquake_type'] = gdf['earthquake_type']
 
-# === Save processed CSV ===
+# Save processed CSV
 output_file = f"{output_dir}/usgs_earthquake_processed.csv"
 df.to_csv(output_file, index=False)
 print(f"\nData saved to {output_file}")
