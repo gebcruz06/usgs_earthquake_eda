@@ -36,19 +36,25 @@ for feature in data:
         'updated': pd.to_datetime(properties.get('updated', 0), unit='ms', errors='coerce')
     }
     records.append(record)
+
 df = pd.DataFrame(records)
 
-# Classify significance
-def classify_sig(sig):
-    if pd.isna(sig):
+# Classify magnitude
+def classify_mag(mag):
+    if pd.isna(mag):
         return None
-    elif sig < 100:
-        return 'Low'
-    elif sig < 500:
-        return 'Moderate'
+    elif mag >= 8.0:
+        return 'Great'
+    elif mag >= 7.0:
+        return 'Major'
+    elif mag >= 6.0:
+        return 'Strong'
+    elif mag > 2.5:
+        return 'Light'
     else:
-        return 'High'
-df['sig_class'] = df['sig'].apply(classify_sig)
+        return 'Minor'
+
+df['mag_class'] = df['mag'].apply(classify_mag)
 
 # Create GeoDataFrame
 print(f"Geocoding {len(df)} earthquake records using coordinates...")
@@ -69,11 +75,15 @@ gdf = gdf.sjoin(world[['geometry', 'ADM0_A3']], how='left', predicate='within')
 
 # Add earthquake_type column before nearest country assignment
 gdf['earthquake_type'] = gdf['ADM0_A3'].apply(lambda x: 'inland' if pd.notna(x) else 'coastal')
+
 print(f"Earthquake types assigned: {gdf['earthquake_type'].value_counts().to_dict()}")
 
 # Assign nearest country for null values
+
 null_mask = gdf['ADM0_A3'].isna()
+
 null_count = null_mask.sum()
+
 if null_count > 0:
     print(f"Found {null_count} earthquakes without country assignment. Assigning nearest country...")
     for idx in gdf[null_mask].index:
