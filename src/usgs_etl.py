@@ -5,10 +5,8 @@ import os
 
 input_dir = './data/raw'
 os.makedirs(input_dir, exist_ok=True)
-
 output_dir = './data/processed'
 os.makedirs(output_dir, exist_ok=True)
-
 file_path = f"{input_dir}/usgs_earthquake_raw.json"
 
 # === Load JSON data ===
@@ -22,7 +20,6 @@ for feature in data:
     geometry = feature.get('geometry', {})
     properties = feature.get('properties', {})
     coordinates = geometry.get('coordinates', [0, 0, 0])
-
     record = {
         'id': feature.get('id'),
         'longitude': coordinates[0] if coordinates[0] is not None else 0,
@@ -70,6 +67,17 @@ gdf = gpd.GeoDataFrame(
 
 # Spatial join to get country code
 gdf = gdf.sjoin(world[['geometry', 'ADM0_A3']], how='left', predicate='within')
+
+# === Assign nearest country for null values ===
+null_mask = gdf['ADM0_A3'].isna()
+null_count = null_mask.sum()
+
+if null_count > 0:
+    print(f"Found {null_count} earthquakes without country assignment. Assigning nearest country...")
+    for idx in gdf[null_mask].index:
+        nearest_idx = world.distance(gdf.loc[idx, 'geometry']).idxmin()
+        gdf.loc[idx, 'ADM0_A3'] = world.loc[nearest_idx, 'ADM0_A3']
+    print(f"Successfully assigned nearest country to all {null_count} earthquakes.")
 
 # Add country code to DataFrame
 df['country_code'] = gdf['ADM0_A3']
