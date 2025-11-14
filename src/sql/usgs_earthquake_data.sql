@@ -18,7 +18,7 @@ CREATE TABLE [dbo].[usgs_earthquake_data](
 	[magType] [nvarchar](50),
 	[time] [datetime2](7),
 	[updated] [datetime2](7),
-	[sig_class] [nvarchar](50),
+	[mag_class] [nvarchar](50),
 	[country_code] [nvarchar](50),
 	[earthquake_type] [nvarchar](50)
 ) ON [PRIMARY]
